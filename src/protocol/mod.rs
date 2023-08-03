@@ -8,10 +8,35 @@ use crate::proto::{ProtocolMessage, ProtocolType};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 
-#[typetag::serde]
+#[derive(Serialize, Deserialize)]
+pub enum ProtocolPayload {
+    ElgamalKeygen(elgamal::KeygenContext),
+    ElgamalDecrypt(elgamal::DecryptContext),
+    FrostKeygen(frost::KeygenContext),
+    FrostSign(frost::SignContext),
+    Gg18Keygen(gg18::KeygenContext),
+    Gg18Sign(gg18::SignContext),
+}
+
+impl ProtocolPayload {
+    pub fn boxed(self) -> Box<dyn Protocol>{
+        match self {
+            ProtocolPayload::ElgamalKeygen(ctx) => Box::new(ctx),
+            ProtocolPayload::ElgamalDecrypt(ctx) => Box::new(ctx),
+            ProtocolPayload::FrostKeygen(ctx) => Box::new(ctx),
+            ProtocolPayload::FrostSign(ctx) => Box::new(ctx),
+            ProtocolPayload::Gg18Keygen(ctx) => Box::new(ctx),
+            ProtocolPayload::Gg18Sign(ctx) => Box::new(ctx),
+        }
+    }
+}
+
 pub trait Protocol {
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>>;
     fn finish(self: Box<Self>) -> Result<Vec<u8>>;
+
+    // TODO: look at downcasting
+    fn transport(self: Box<Self>) -> ProtocolPayload;
 }
 
 pub trait KeygenProtocol: Protocol {

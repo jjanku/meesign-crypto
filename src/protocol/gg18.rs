@@ -6,7 +6,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct KeygenContext {
+pub struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -73,7 +73,6 @@ impl KeygenContext {
     }
 }
 
-#[typetag::serde(name = "gg18_keygen")]
 impl Protocol for KeygenContext {
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = match self.round {
@@ -89,6 +88,10 @@ impl Protocol for KeygenContext {
             _ => Err("protocol not finished".into()),
         }
     }
+
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::Gg18Keygen(*self)
+    }
 }
 
 impl KeygenProtocol for KeygenContext {
@@ -100,7 +103,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SignContext {
+pub struct SignContext {
     round: SignRound,
 }
 
@@ -197,7 +200,6 @@ impl SignContext {
     }
 }
 
-#[typetag::serde(name = "gg18_sign")]
 impl Protocol for SignContext {
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = match self.round {
@@ -212,6 +214,10 @@ impl Protocol for SignContext {
             SignRound::Done(sig) => Ok(sig),
             _ => Err("protocol not finished".into()),
         }
+    }
+
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::Gg18Sign(*self)
     }
 }
 

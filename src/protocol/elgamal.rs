@@ -20,7 +20,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct KeygenContext {
+pub struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -129,8 +129,11 @@ impl KeygenContext {
     }
 }
 
-#[typetag::serde(name = "elgamal_keygen")]
 impl Protocol for KeygenContext {
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::ElgamalKeygen(*self)
+    }
+
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = match self.round {
             KeygenRound::R0 => self.init(data),
@@ -156,7 +159,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct DecryptContext {
+pub struct DecryptContext {
     ctx: ActiveParticipant<Ristretto>,
     encrypted_key: Ciphertext<Ristretto>,
     data: (Vec<u8>, Vec<u8>, Vec<u8>),
@@ -259,8 +262,11 @@ impl DecryptContext {
     }
 }
 
-#[typetag::serde(name = "elgamal_decrypt")]
 impl Protocol for DecryptContext {
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::ElgamalDecrypt(*self)
+    }
+
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = if self.shares.is_empty() {
             self.init(data)

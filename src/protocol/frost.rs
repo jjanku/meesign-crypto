@@ -15,7 +15,7 @@ use frost_secp256k1 as frost;
 use rand::rngs::OsRng;
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct KeygenContext {
+pub struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -92,8 +92,11 @@ impl KeygenContext {
     }
 }
 
-#[typetag::serde(name = "frost_keygen")]
 impl Protocol for KeygenContext {
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::FrostKeygen(*self)
+    }
+
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = match self.round {
             KeygenRound::R0 => self.init(data),
@@ -121,7 +124,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SignContext {
+pub struct SignContext {
     key: KeyPackage,
     pubkey: PublicKeyPackage,
     message: Option<Vec<u8>>,
@@ -228,8 +231,11 @@ impl SignContext {
     }
 }
 
-#[typetag::serde(name = "frost_sign")]
 impl Protocol for SignContext {
+    fn transport(self: Box<Self>) -> ProtocolPayload {
+        ProtocolPayload::FrostSign(*self)
+    }
+
     fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let data = match self.round {
             SignRound::R0 => self.init(data),
