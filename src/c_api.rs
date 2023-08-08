@@ -25,25 +25,21 @@ pub enum ProtocolId {
 pub struct Buffer {
     ptr: *mut u8,
     len: usize,
-    capacity: usize,
 }
 
 impl From<Vec<u8>> for Buffer {
     fn from(vec: Vec<u8>) -> Self {
-        let mut mem = std::mem::ManuallyDrop::new(vec);
+        let mut mem = std::mem::ManuallyDrop::new(vec.into_boxed_slice());
         Self {
             ptr: mem.as_mut_ptr(),
             len: mem.len(),
-            capacity: mem.capacity(),
         }
     }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        unsafe {
-            Vec::from_raw_parts(self.ptr, self.len, self.capacity);
-        }
+        unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(self.ptr, self.len))) }
     }
 }
 
