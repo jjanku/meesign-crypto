@@ -11,9 +11,14 @@ use crate::proto::{ProtocolMessage, ProtocolType};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 
+pub enum Recipient {
+    Card,
+    Server,
+}
+
 #[typetag::serde]
 pub trait Protocol {
-    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>>;
+    fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)>;
     fn finish(self: Box<Self>) -> Result<Vec<u8>>;
 }
 
@@ -103,6 +108,7 @@ mod tests {
                             .encode_to_vec(),
                         )
                         .unwrap()
+                        .0
                         .into(),
                     )
                     .unwrap()
@@ -141,6 +147,7 @@ mod tests {
                                 .encode_to_vec(),
                             )
                             .unwrap()
+                            .0
                             .into(),
                         )
                         .unwrap()
@@ -192,6 +199,7 @@ mod tests {
                             .encode_to_vec(),
                         )
                         .unwrap()
+                        .0
                         .into(),
                     )
                     .unwrap()
@@ -230,6 +238,7 @@ mod tests {
                                 .encode_to_vec(),
                             )
                             .unwrap()
+                            .0
                             .into(),
                         )
                         .unwrap()

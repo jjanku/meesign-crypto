@@ -94,12 +94,12 @@ impl KeygenContext {
 
 #[typetag::serde(name = "frost_keygen")]
 impl Protocol for KeygenContext {
-    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let data = match self.round {
             KeygenRound::R0 => self.init(data),
             _ => self.update(data),
         }?;
-        Ok(data)
+        Ok((data, Recipient::Server))
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
@@ -230,12 +230,12 @@ impl SignContext {
 
 #[typetag::serde(name = "frost_sign")]
 impl Protocol for SignContext {
-    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let data = match self.round {
             SignRound::R0 => self.init(data),
             _ => self.update(data),
         }?;
-        Ok(data)
+        Ok((data, Recipient::Server))
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {

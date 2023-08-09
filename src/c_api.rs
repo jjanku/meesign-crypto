@@ -22,18 +22,42 @@ pub enum ProtocolId {
 }
 
 #[repr(C)]
+pub enum Recipient {
+    Unknown,
+    Card,
+    Server,
+}
+
+impl From<protocol::Recipient> for Recipient {
+    fn from(value: protocol::Recipient) -> Self {
+        match value {
+            protocol::Recipient::Card => Recipient::Card,
+            protocol::Recipient::Server => Recipient::Server,
+        }
+    }
+}
+
+#[repr(C)]
 pub struct Buffer {
     ptr: *mut u8,
     len: usize,
+    rec: Recipient,
 }
 
-impl From<Vec<u8>> for Buffer {
-    fn from(vec: Vec<u8>) -> Self {
+impl Buffer {
+    pub fn from_vec(vec: Vec<u8>, rec: Recipient) -> Self {
         let mut mem = std::mem::ManuallyDrop::new(vec.into_boxed_slice());
         Self {
             ptr: mem.as_mut_ptr(),
             len: mem.len(),
+            rec,
         }
+    }
+}
+
+impl From<Vec<u8>> for Buffer {
+    fn from(vec: Vec<u8>) -> Self {
+        Buffer::from_vec(vec, Recipient::Unknown)
     }
 }
 
@@ -114,14 +138,14 @@ pub unsafe extern "C" fn protocol_advance(
     let data_in = unsafe { slice::from_raw_parts(data_ptr, data_len) };
     let proto = unsafe { &mut *proto_ptr };
 
-    match proto.instance.advance(data_in) {
-        Ok(data_out) => data_out,
+    let (vec, rec) = match proto.instance.advance(data_in) {
+        Ok((vec, rec)) => (vec, rec.into()),
         Err(error) => {
             set_error(error_out, &*error);
-            vec![]
+            (vec![], Recipient::Unknown)
         }
-    }
-    .into()
+    };
+    Buffer::from_vec(vec, rec)
 }
 
 #[cfg(feature = "protocol")]
