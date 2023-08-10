@@ -114,15 +114,14 @@ pub unsafe extern "C" fn protocol_deserialize(ctx_ptr: *const u8, ctx_len: usize
 
 #[cfg(feature = "protocol")]
 #[no_mangle]
-pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId) -> *mut Protocol {
-    Protocol::wrap(match proto_id {
+pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId, with_card: bool) -> *mut Protocol {
+    Protocol::wrap(match (proto_id, with_card) {
         #[cfg(feature = "gg18")]
-        ProtocolId::Gg18 => Box::new(gg18::KeygenContext::new()),
+        (ProtocolId::Gg18, false) => Box::new(gg18::KeygenContext::new()),
         #[cfg(feature = "elgamal")]
-        ProtocolId::Elgamal => Box::new(elgamal::KeygenContext::new()),
+        (ProtocolId::Elgamal, false) => Box::new(elgamal::KeygenContext::new()),
         #[cfg(feature = "frost")]
-        ProtocolId::Frost => Box::new(frost::KeygenContext::new()),
-        #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        (ProtocolId::Frost, false) => Box::new(frost::KeygenContext::new()),
         _ => panic!("Protocol not supported"),
     })
 }
@@ -169,6 +168,7 @@ pub unsafe extern "C" fn protocol_finish(
 #[cfg(feature = "protocol")]
 #[no_mangle]
 pub unsafe extern "C" fn protocol_init(
+    // TODO: proto_id should be inferred from group
     proto_id: ProtocolId,
     group_ptr: *const u8,
     group_len: usize,
