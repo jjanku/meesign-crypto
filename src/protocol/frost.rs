@@ -323,3 +323,86 @@ mod tests {
         }
     }
 }
+
+mod jc {
+
+    pub mod command {
+        use super::super::frost;
+        use crate::protocol::apdu::CommandBuilder;
+        use frost::round1;
+
+        const CLA: u8 = 0;
+
+        const INS_SETUP: u8 = 1;
+        const INS_COMMIT: u8 = 2;
+        const INS_COMMITMENT: u8 = 3;
+        const INS_SIGN: u8 = 4;
+
+        pub fn setup(
+            t: u8,
+            n: u8,
+            identifier: u8,
+            secret: &frost::keys::SigningShare,
+            group_public: &frost::VerifyingKey,
+        ) -> Vec<u8> {
+            CommandBuilder::new(CLA, INS_SETUP)
+                .p1(t)
+                .p2(n)
+                .push(identifier)
+                .extend(&secret.serialize())
+                .extend(&group_public.serialize())
+                .build()
+        }
+
+        pub fn commit() -> Vec<u8> {
+            CommandBuilder::new(CLA, INS_COMMIT).build()
+        }
+
+        pub fn commitment(identifier: u8, commitments: &round1::SigningCommitments) -> Vec<u8> {
+            CommandBuilder::new(CLA, INS_COMMITMENT)
+                .p1(identifier)
+                .extend(&commitments.hiding().serialize())
+                .extend(&commitments.binding().serialize())
+                .build()
+        }
+
+        pub fn sign(message: &[u8]) -> Vec<u8> {
+            CommandBuilder::new(CLA, INS_SIGN)
+                .p1(message.len() as u8)
+                .extend(message)
+                .build()
+        }
+    }
+
+    pub mod response {
+        use super::super::frost;
+        use crate::protocol::apdu::parse_response;
+        use crate::protocol::Result;
+        use frost::{round1, round2};
+        use std::convert::TryInto;
+
+        pub fn setup(raw: &[u8]) -> Result<()> {
+            parse_response(raw)?;
+            Ok(())
+        }
+
+        pub fn commit(raw: &[u8]) -> Result<round1::SigningCommitments> {
+            let data = parse_response(raw)?;
+            let (hiding, binding) = data.split_at(data.len() / 2);
+            let hiding = round1::NonceCommitment::deserialize(hiding.try_into()?)?;
+            let binding = round1::NonceCommitment::deserialize(binding.try_into()?)?;
+            Ok(round1::SigningCommitments::new(hiding, binding))
+        }
+
+        pub fn commitment(raw: &[u8]) -> Result<()> {
+            parse_response(raw)?;
+            Ok(())
+        }
+
+        pub fn sign(raw: &[u8]) -> Result<round2::SignatureShare> {
+            let data = parse_response(raw)?;
+            let signature = round2::SignatureShare::deserialize(data.try_into()?)?;
+            Ok(signature)
+        }
+    }
+}
