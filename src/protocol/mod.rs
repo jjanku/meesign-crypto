@@ -5,6 +5,8 @@ pub mod frost;
 #[cfg(feature = "gg18")]
 pub mod gg18;
 
+mod apdu;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use crate::proto::{ProtocolMessage, ProtocolType};
