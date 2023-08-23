@@ -122,6 +122,8 @@ pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId, with_card: bool) 
         (ProtocolId::Elgamal, false) => Box::new(elgamal::KeygenContext::new()),
         #[cfg(feature = "frost")]
         (ProtocolId::Frost, false) => Box::new(frost::KeygenContext::new()),
+        #[cfg(feature = "frost")]
+        (ProtocolId::Frost, true) => Box::new(frost::KeygenContext::with_card()),
         _ => panic!("Protocol not supported"),
     })
 }
