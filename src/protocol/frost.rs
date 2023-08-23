@@ -14,6 +14,13 @@ use std::convert::{TryFrom, TryInto};
 use frost_secp256k1 as frost;
 use rand::rngs::OsRng;
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
+struct Setup {
+    threshold: u16,
+    parties: u16,
+    index: u16,
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct KeygenContext {
     round: KeygenRound,
@@ -22,9 +29,13 @@ pub(crate) struct KeygenContext {
 #[derive(Serialize, Deserialize)]
 enum KeygenRound {
     R0,
-    R1(round1::SecretPackage),
-    R2(round2::SecretPackage, BTreeMap<Identifier, round1::Package>),
-    Done(KeyPackage, PublicKeyPackage),
+    R1(Setup, round1::SecretPackage),
+    R2(
+        Setup,
+        round2::SecretPackage,
+        BTreeMap<Identifier, round1::Package>,
+    ),
+    Done(Setup, KeyPackage, PublicKeyPackage),
 }
 
 impl KeygenContext {
@@ -34,16 +45,21 @@ impl KeygenContext {
             return Err("wrong protocol type".into());
         }
 
-        let (parties, threshold, index) = (
-            msg.parties as u16,
-            msg.threshold as u16,
-            (msg.index as u16).try_into()?,
-        );
+        let setup = Setup {
+            threshold: msg.threshold as u16,
+            parties: msg.parties as u16,
+            index: msg.index as u16,
+        };
 
-        let (secret_package, public_package) = dkg::part1(index, parties, threshold, OsRng)?;
+        let (secret_package, public_package) = dkg::part1(
+            setup.index.try_into()?,
+            setup.parties,
+            setup.threshold,
+            OsRng,
+        )?;
 
-        let msgs = serialize_bcast(&public_package, (parties - 1) as usize)?;
-        self.round = KeygenRound::R1(secret_package);
+        let msgs = serialize_bcast(&public_package, (setup.parties - 1) as usize)?;
+        self.round = KeygenRound::R1(setup, secret_package);
         Ok(pack(msgs, ProtocolType::Frost))
     }
 
@@ -58,7 +74,7 @@ impl KeygenContext {
     fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let (c, msgs) = match &self.round {
             KeygenRound::R0 => return Err("protocol not initialized".into()),
-            KeygenRound::R1(secret) => {
+            KeygenRound::R1(setup, secret) => {
                 let data: Vec<round1::Package> = deserialize_vec(&unpack(data)?)?;
                 let round1: BTreeMap<Identifier, round1::Package> = data
                     .into_iter()
@@ -70,9 +86,12 @@ impl KeygenContext {
                 round2.sort_by_key(|(i, _)| *i);
                 let round2: Vec<_> = round2.into_iter().map(|(_, p)| p).collect();
 
-                (KeygenRound::R2(secret, round1), serialize_uni(round2)?)
+                (
+                    KeygenRound::R2(*setup, secret, round1),
+                    serialize_uni(round2)?,
+                )
             }
-            KeygenRound::R2(secret, round1) => {
+            KeygenRound::R2(setup, secret, round1) => {
                 let data: Vec<round2::Package> = deserialize_vec(&unpack(data)?)?;
                 let round2: BTreeMap<Identifier, round2::Package> = data
                     .into_iter()
@@ -82,9 +101,9 @@ impl KeygenContext {
                 let (key, pubkey) = frost::keys::dkg::part3(secret, round1, &round2)?;
 
                 let msgs = inflate(serde_json::to_vec(&pubkey.verifying_key())?, round2.len());
-                (KeygenRound::Done(key, pubkey), msgs)
+                (KeygenRound::Done(*setup, key, pubkey), msgs)
             }
-            KeygenRound::Done(_, _) => return Err("protocol already finished".into()),
+            KeygenRound::Done(_, _, _) => return Err("protocol already finished".into()),
         };
         self.round = c;
 
@@ -104,8 +123,8 @@ impl Protocol for KeygenContext {
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
         match self.round {
-            KeygenRound::Done(key_package, pubkey_package) => {
-                Ok(serde_json::to_vec(&(key_package, pubkey_package))?)
+            KeygenRound::Done(setup, key_package, pubkey_package) => {
+                Ok(serde_json::to_vec(&(setup, key_package, pubkey_package))?)
             }
             _ => Err("protocol not finished".into()),
         }
@@ -122,6 +141,7 @@ impl KeygenProtocol for KeygenContext {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SignContext {
+    setup: Setup,
     key: KeyPackage,
     pubkey: PublicKeyPackage,
     message: Option<Vec<u8>>,
@@ -248,9 +268,10 @@ impl Protocol for SignContext {
 
 impl ThresholdProtocol for SignContext {
     fn new(group: &[u8]) -> Self {
-        let (key, pubkey): (KeyPackage, PublicKeyPackage) =
+        let (setup, key, pubkey): (Setup, KeyPackage, PublicKeyPackage) =
             serde_json::from_slice(group).expect("could not deserialize group context");
         Self {
+            setup,
             key,
             pubkey,
             message: None,
