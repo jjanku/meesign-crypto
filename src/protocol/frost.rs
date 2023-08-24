@@ -10,6 +10,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
+use std::iter::FromIterator;
 
 use frost_secp256k1 as frost;
 use rand::rngs::OsRng;
@@ -19,6 +20,25 @@ struct Setup {
     threshold: u16,
     parties: u16,
     index: u16,
+}
+
+fn map_share_vec<T, C>(vec: Vec<T>, indices: &[u16], index: u16) -> Result<C>
+where
+    C: FromIterator<(Identifier, T)>,
+{
+    let pos = indices
+        .iter()
+        .position(|&x| x == index)
+        .ok_or("missing index")?;
+    let collection = vec
+        .into_iter()
+        .enumerate()
+        .map(move |(i, item)| {
+            let index = indices[if i < pos { i } else { i + 1 }];
+            (Identifier::try_from(index).unwrap(), item)
+        })
+        .collect();
+    Ok(collection)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,24 +83,12 @@ impl KeygenContext {
         Ok(pack(msgs, ProtocolType::Frost))
     }
 
-    fn index_to_identifier(mut index: usize, local_identifier: &Identifier) -> Identifier {
-        index += 1;
-        if &Identifier::try_from(index as u16).unwrap() >= local_identifier {
-            index += 1
-        };
-        Identifier::try_from(index as u16).unwrap()
-    }
-
     fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let (c, msgs) = match &self.round {
             KeygenRound::R0 => return Err("protocol not initialized".into()),
             KeygenRound::R1(setup, secret) => {
                 let data: Vec<round1::Package> = deserialize_vec(&unpack(data)?)?;
-                let round1: BTreeMap<Identifier, round1::Package> = data
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, msg)| (Self::index_to_identifier(i, secret.identifier()), msg))
-                    .collect();
+                let round1 = map_share_vec(data, &Vec::from_iter(1..=setup.parties), setup.index)?;
                 let (secret, round2) = dkg::part2(secret.clone(), &round1)?;
                 let mut round2: Vec<_> = round2.into_iter().collect();
                 round2.sort_by_key(|(i, _)| *i);
@@ -93,11 +101,7 @@ impl KeygenContext {
             }
             KeygenRound::R2(setup, secret, round1) => {
                 let data: Vec<round2::Package> = deserialize_vec(&unpack(data)?)?;
-                let round2: BTreeMap<Identifier, round2::Package> = data
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, msg)| (Self::index_to_identifier(i, secret.identifier()), msg))
-                    .collect();
+                let round2 = map_share_vec(data, &Vec::from_iter(1..=setup.parties), setup.index)?;
                 let (key, pubkey) = frost::keys::dkg::part3(secret, round1, &round2)?;
 
                 let msgs = inflate(serde_json::to_vec(&pubkey.verifying_key())?, round2.len());
@@ -158,18 +162,6 @@ enum SignRound {
 }
 
 impl SignContext {
-    fn local_index(&self) -> Result<usize> {
-        let identifier = self.key.identifier();
-        self.indices
-            .as_ref()
-            .and_then(|indices| {
-                indices
-                    .iter()
-                    .position(|x| &Identifier::try_from(*x).unwrap() == identifier)
-            })
-            .ok_or("participant index not included".into())
-    }
-
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
         if msg.protocol_type != ProtocolType::Frost as i32 {
@@ -190,23 +182,10 @@ impl SignContext {
         match &self.round {
             SignRound::R0 => Err("protocol not initialized".into()),
             SignRound::R1(nonces, commitments) => {
-                let local_index = self.local_index()?;
                 let data: Vec<SigningCommitments> = deserialize_vec(&unpack(data)?)?;
 
-                let mut commitments_map: BTreeMap<Identifier, SigningCommitments> = data
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, msg)| {
-                        (
-                            Identifier::try_from(
-                                self.indices.as_ref().unwrap()
-                                    [if i >= local_index { i + 1 } else { i }],
-                            )
-                            .unwrap(),
-                            msg,
-                        )
-                    })
-                    .collect();
+                let mut commitments_map: BTreeMap<Identifier, SigningCommitments> =
+                    map_share_vec(data, self.indices.as_deref().unwrap(), self.setup.index)?;
                 commitments_map.insert(*self.key.identifier(), *commitments);
 
                 let signing_package =
@@ -218,23 +197,10 @@ impl SignContext {
                 Ok(pack(msgs, ProtocolType::Frost))
             }
             SignRound::R2(signing_package, share) => {
-                let local_index = self.local_index()?;
                 let data: Vec<SignatureShare> = deserialize_vec(&unpack(data)?)?;
 
-                let mut shares: BTreeMap<Identifier, SignatureShare> = data
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, msg)| {
-                        (
-                            Identifier::try_from(
-                                self.indices.as_ref().unwrap()
-                                    [if i >= local_index { i + 1 } else { i }],
-                            )
-                            .unwrap(),
-                            msg,
-                        )
-                    })
-                    .collect();
+                let mut shares: BTreeMap<Identifier, SignatureShare> =
+                    map_share_vec(data, self.indices.as_deref().unwrap(), self.setup.index)?;
                 shares.insert(*self.key.identifier(), *share);
 
                 let signature = frost::aggregate(signing_package, &shares, &self.pubkey)?;
