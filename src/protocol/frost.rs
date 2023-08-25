@@ -426,4 +426,109 @@ mod jc {
             Ok(signature)
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use std::{
+            collections::{BTreeMap, HashMap},
+            convert::TryFrom,
+            error::Error,
+        };
+
+        use crate::protocol::apdu::{parse_response, CommandBuilder};
+
+        use super::{super::frost, command, response};
+        use frost::Identifier;
+        use pcsc;
+        use rand::rngs::OsRng;
+
+        #[test]
+        fn sign_card() -> Result<(), Box<dyn Error>> {
+            // connect to card
+            let ctx = pcsc::Context::establish(pcsc::Scope::User)?;
+            let mut readers_buf = [0; 2048];
+            let reader = ctx
+                .list_readers(&mut readers_buf)?
+                .next()
+                .ok_or("no reader")?;
+            let card = ctx.connect(reader, pcsc::ShareMode::Shared, pcsc::Protocols::ANY)?;
+            let mut resp_buf = [0; pcsc::MAX_BUFFER_SIZE];
+
+            // select JCFROST
+            let aid = b"\x6a\x63\x66\x72\x6f\x73\x74\x61\x70\x70";
+            let select = CommandBuilder::new(0x00, 0xa4).p1(0x04).extend(aid).build();
+            let resp = card.transmit(&select, &mut resp_buf)?;
+            parse_response(resp)?;
+
+            let t: u8 = 2;
+            let n: u8 = 3;
+
+            // keygen
+            let (key_shares, pubkey_pkg) = frost::keys::generate_with_dealer(
+                n.into(),
+                t.into(),
+                frost::keys::IdentifierList::Default,
+                rand::thread_rng(),
+            )?;
+
+            let mut key_pkgs: HashMap<_, _> = key_shares
+                .into_iter()
+                .map(|(id, key_share)| (id, frost::keys::KeyPackage::try_from(key_share).unwrap()))
+                .collect();
+
+            let card_id = Identifier::try_from(1).unwrap();
+            let cmd = command::setup(
+                t,
+                n,
+                1,
+                key_pkgs[&card_id].signing_share(),
+                pubkey_pkg.verifying_key(),
+            );
+            let resp = card.transmit(&cmd, &mut resp_buf)?;
+            response::setup(resp)?;
+            key_pkgs.remove(&card_id);
+
+            // commit
+            let cmd = command::commit();
+            let resp = card.transmit(&cmd, &mut resp_buf)?;
+            let card_commitments = response::commit(resp)?;
+
+            let mut nonces_map = HashMap::new();
+            let mut commitments_map = BTreeMap::new();
+            commitments_map.insert(card_id, card_commitments);
+
+            for (id, key_pkg) in &key_pkgs {
+                let (nonces, commitments) =
+                    frost::round1::commit(key_pkg.signing_share(), &mut OsRng);
+                nonces_map.insert(*id, nonces);
+                commitments_map.insert(*id, commitments);
+            }
+
+            // commitments
+            for (i, commitments) in commitments_map.values().enumerate() {
+                let cmd = command::commitment((i + 1) as u8, commitments);
+                let resp = card.transmit(&cmd, &mut resp_buf)?;
+                response::commitment(resp)?;
+            }
+
+            // sign
+            let message = vec![0xff; 16];
+            let signing_package = frost::SigningPackage::new(commitments_map, &message);
+
+            let cmd = command::sign(&message);
+            let resp = card.transmit(&cmd, &mut resp_buf)?;
+            let card_share = response::sign(resp)?;
+
+            let mut share_map = BTreeMap::new();
+            share_map.insert(card_id, card_share);
+            for (id, key_pkg) in &key_pkgs {
+                let share = frost::round2::sign(&signing_package, &nonces_map[id], key_pkg)?;
+                share_map.insert(*id, share);
+            }
+
+            frost::aggregate(&signing_package, &share_map, &pubkey_pkg)?;
+
+            Ok(())
+        }
+    }
 }

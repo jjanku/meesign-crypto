@@ -28,6 +28,7 @@ prost-build = "0.11"
 
 [dev-dependencies]
 p256 = { version="0.13.2", features = ["ecdsa"] }
+pcsc = "2.8.0"
 sha2 = "0.10.7"
 
 [features]
