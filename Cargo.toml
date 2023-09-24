@@ -20,6 +20,7 @@ rand = "0.8.5"
 curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
 frost-secp256k1 = { git  = "https://github.com/dufkan/frost.git", branch = "serialize-state", features = ["serde"], optional = true }
 aes-gcm = "0.10.2"
+k256 = { version = "0.13.1", features = ["arithmetic"] }
 
 [build-dependencies]
 cbindgen = "0.20.0"

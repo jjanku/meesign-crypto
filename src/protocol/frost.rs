@@ -325,9 +325,25 @@ mod tests {
 }
 
 mod jc {
+    mod util {
+        use crate::protocol::Result;
+        use k256::{
+            elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint},
+            AffinePoint, EncodedPoint,
+        };
+
+        pub fn reencode_point(ser: &[u8], compress: bool) -> Result<Box<[u8]>> {
+            let encoded = EncodedPoint::from_bytes(ser)?;
+            match Option::<AffinePoint>::from(AffinePoint::from_encoded_point(&encoded)) {
+                Some(affine) => Ok(affine.to_encoded_point(compress).to_bytes()),
+                None => Err("Invalid point".into()),
+            }
+        }
+    }
 
     pub mod command {
         use super::super::frost;
+        use super::util::reencode_point;
         use crate::protocol::apdu::CommandBuilder;
         use frost::round1;
 
@@ -350,7 +366,7 @@ mod jc {
                 .p2(n)
                 .push(identifier)
                 .extend(&secret.serialize())
-                .extend(&group_public.serialize())
+                .extend(&reencode_point(&group_public.serialize(), false).unwrap())
                 .build()
         }
 
@@ -361,8 +377,8 @@ mod jc {
         pub fn commitment(identifier: u8, commitments: &round1::SigningCommitments) -> Vec<u8> {
             CommandBuilder::new(CLA, INS_COMMITMENT)
                 .p1(identifier)
-                .extend(&commitments.hiding().serialize())
-                .extend(&commitments.binding().serialize())
+                .extend(&reencode_point(&commitments.hiding().serialize(), false).unwrap())
+                .extend(&reencode_point(&commitments.binding().serialize(), false).unwrap())
                 .build()
         }
 
@@ -376,6 +392,7 @@ mod jc {
 
     pub mod response {
         use super::super::frost;
+        use super::util::reencode_point;
         use crate::protocol::apdu::parse_response;
         use crate::protocol::Result;
         use frost::{round1, round2};
@@ -389,8 +406,12 @@ mod jc {
         pub fn commit(raw: &[u8]) -> Result<round1::SigningCommitments> {
             let data = parse_response(raw)?;
             let (hiding, binding) = data.split_at(data.len() / 2);
-            let hiding = round1::NonceCommitment::deserialize(hiding.try_into()?)?;
-            let binding = round1::NonceCommitment::deserialize(binding.try_into()?)?;
+            let hiding = round1::NonceCommitment::deserialize(
+                reencode_point(hiding, true)?.as_ref().try_into().unwrap(),
+            )?;
+            let binding = round1::NonceCommitment::deserialize(
+                reencode_point(binding, true)?.as_ref().try_into().unwrap(),
+            )?;
             Ok(round1::SigningCommitments::new(hiding, binding))
         }
 
